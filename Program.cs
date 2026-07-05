@@ -1,9 +1,82 @@
+using Microsoft.Extensions.Options;
+using renegotiation_service.Clients;
+using renegotiation_service.Configuration;
+using renegotiation_service.Endpoints;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// Attach distributed-trace IDs to every log scope and render scopes in console output,
+// so a single request can be correlated across an endpoint and its underlying HTTP client call.
+builder.Logging.Configure(options =>
+{
+    options.ActivityTrackingOptions = ActivityTrackingOptions.TraceId
+        | ActivityTrackingOptions.SpanId
+        | ActivityTrackingOptions.ParentId;
+});
+builder.Logging.AddSimpleConsole(options => options.IncludeScopes = true);
+
+builder.Services.AddOptions<ClientApiOptions>()
+    .Bind(builder.Configuration.GetSection(ClientApiOptions.SectionName));
+builder.Services.AddOptions<EligibilityApiOptions>()
+    .Bind(builder.Configuration.GetSection(EligibilityApiOptions.SectionName));
+builder.Services.AddOptions<ContractingApiOptions>()
+    .Bind(builder.Configuration.GetSection(ContractingApiOptions.SectionName));
+builder.Services.AddOptions<FormalizationApiOptions>()
+    .Bind(builder.Configuration.GetSection(FormalizationApiOptions.SectionName));
+
+var clientApiRetryAttempts = builder.Configuration.GetValue($"{ClientApiOptions.SectionName}:RetryAttempts", 2);
+var eligibilityApiRetryAttempts = builder.Configuration.GetValue($"{EligibilityApiOptions.SectionName}:RetryAttempts", 2);
+var contractingApiRetryAttempts = builder.Configuration.GetValue($"{ContractingApiOptions.SectionName}:RetryAttempts", 2);
+var formalizationApiRetryAttempts = builder.Configuration.GetValue($"{FormalizationApiOptions.SectionName}:RetryAttempts", 2);
+
+builder.Services.AddHttpClient<IClientApiClient, ClientApiClient>((sp, client) =>
+    {
+        var options = sp.GetRequiredService<IOptions<ClientApiOptions>>().Value;
+        client.BaseAddress = new Uri(options.BaseUrl);
+    })
+    .AddStandardResilienceHandler(options =>
+    {
+        options.Retry.MaxRetryAttempts = clientApiRetryAttempts;
+        options.Retry.Delay = TimeSpan.FromMilliseconds(200);
+    });
+
+builder.Services.AddHttpClient<IEligibilityApiClient, EligibilityApiClient>((sp, client) =>
+    {
+        var options = sp.GetRequiredService<IOptions<EligibilityApiOptions>>().Value;
+        client.BaseAddress = new Uri(options.BaseUrl);
+    })
+    .AddStandardResilienceHandler(options =>
+    {
+        options.Retry.MaxRetryAttempts = eligibilityApiRetryAttempts;
+        options.Retry.Delay = TimeSpan.FromMilliseconds(200);
+    });
+
+builder.Services.AddHttpClient<IContractingApiClient, ContractingApiClient>((sp, client) =>
+    {
+        var options = sp.GetRequiredService<IOptions<ContractingApiOptions>>().Value;
+        client.BaseAddress = new Uri(options.BaseUrl);
+    })
+    .AddStandardResilienceHandler(options =>
+    {
+        options.Retry.MaxRetryAttempts = contractingApiRetryAttempts;
+        options.Retry.Delay = TimeSpan.FromMilliseconds(200);
+    });
+
+builder.Services.AddHttpClient<IFormalizationApiClient, FormalizationApiClient>((sp, client) =>
+    {
+        var options = sp.GetRequiredService<IOptions<FormalizationApiOptions>>().Value;
+        client.BaseAddress = new Uri(options.BaseUrl);
+    })
+    .AddStandardResilienceHandler(options =>
+    {
+        options.Retry.MaxRetryAttempts = formalizationApiRetryAttempts;
+        options.Retry.Delay = TimeSpan.FromMilliseconds(200);
+    });
 
 var app = builder.Build();
 
@@ -16,29 +89,21 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-var summaries = new[]
+app.Use(async (context, next) =>
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+    var logger = context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("CorrelationId");
+    var correlationId = Guid.NewGuid().ToString("n");
+    using (logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId }))
+    {
+        await next(context);
+    }
+});
 
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast = Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast")
-.WithOpenApi();
+app.MapClientLookupEndpoints();
+app.MapEligibilityEndpoints();
+app.MapSimulationEndpoints();
+app.MapFormalizationEndpoints();
 
 app.Run();
 
-internal record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
+public partial class Program;
