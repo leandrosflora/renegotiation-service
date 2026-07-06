@@ -20,16 +20,16 @@ Ele expõe endpoints canônicos para consulta de cliente, contratos, dívidas, e
 
 ```mermaid
 flowchart LR
-    C[Consumer / Channel / BFF] --> RS[renegotiation-service]
+    C["Consumer / Channel / BFF"] --> RS["renegotiation-service"]
 
-    RS -->|GET /clients/{cpf}| CA[Client API]
-    RS -->|GET /clients/{clientId}/contracts| CA
-    RS -->|GET /contracts/{contractId}/debts| CA
+    RS -->|"GET /clients/:cpf"| CA["Client API"]
+    RS -->|"GET /clients/:clientId/contracts"| CA
+    RS -->|"GET /contracts/:contractId/debts"| CA
 
-    RS -->|GET /contracts/{contractId}/eligibility| EA[Eligibility API]
-    RS -->|POST /contracts/{contractId}/simulations| COA[Contracting API]
-    RS -->|POST /simulations/{simulationId}/confirmations| FA[Formalization API]
-    RS -->|GET /agreements/{agreementId}/document| FA
+    RS -->|"GET /contracts/:contractId/eligibility"| EA["Eligibility API"]
+    RS -->|"POST /contracts/:contractId/simulations"| COA["Contracting API"]
+    RS -->|"POST /simulations/:simulationId/confirmations"| FA["Formalization API"]
+    RS -->|"GET /agreements/:agreementId/document"| FA
 ```
 
 ## Stack
