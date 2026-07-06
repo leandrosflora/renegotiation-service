@@ -1,7 +1,7 @@
-using renegotiation_service.Clients;
-using renegotiation_service.Models;
+using renegotiation_service.Application;
+using renegotiation_service.Application.Ports.Inbound;
 
-namespace renegotiation_service.Endpoints;
+namespace renegotiation_service.Adapters.Inbound.Http;
 
 public static class FormalizationEndpoints
 {
@@ -15,18 +15,18 @@ public static class FormalizationEndpoints
 
     private static async Task<IResult> HandleConfirmAsync(
         string simulationId,
-        IFormalizationApiClient client,
+        IConfirmAgreementUseCase useCase,
         ILogger<FormalizationLogCategory> logger,
         CancellationToken cancellationToken)
     {
         try
         {
-            var result = await client.ConfirmAsync(simulationId, cancellationToken);
+            var result = await useCase.ExecuteAsync(simulationId, cancellationToken);
             return Results.Ok(result);
         }
-        catch (Exception ex)
+        catch (UpstreamServiceUnavailableException ex)
         {
-            logger.LogWarning("Formalization API call failed after retries ({ExceptionType})", ex.GetType().Name);
+            logger.LogWarning("{ServiceName} call failed after retries ({ExceptionType})", ex.ServiceName, ex.InnerException?.GetType().Name);
             return Results.Json(
                 new ErrorResponse("Formalization API unavailable"), statusCode: StatusCodes.Status502BadGateway);
         }
@@ -34,18 +34,18 @@ public static class FormalizationEndpoints
 
     private static async Task<IResult> HandleGetDocumentAsync(
         string agreementId,
-        IFormalizationApiClient client,
+        IGetDocumentUseCase useCase,
         ILogger<FormalizationLogCategory> logger,
         CancellationToken cancellationToken)
     {
         try
         {
-            var result = await client.GetDocumentAsync(agreementId, cancellationToken);
+            var result = await useCase.ExecuteAsync(agreementId, cancellationToken);
             return Results.Ok(result);
         }
-        catch (Exception ex)
+        catch (UpstreamServiceUnavailableException ex)
         {
-            logger.LogWarning("Formalization API call failed after retries ({ExceptionType})", ex.GetType().Name);
+            logger.LogWarning("{ServiceName} call failed after retries ({ExceptionType})", ex.ServiceName, ex.InnerException?.GetType().Name);
             return Results.Json(
                 new ErrorResponse("Formalization API unavailable"), statusCode: StatusCodes.Status502BadGateway);
         }

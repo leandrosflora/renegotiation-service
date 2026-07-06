@@ -1,6 +1,6 @@
-using renegotiation_service.Models;
+using renegotiation_service.Domain;
 
-namespace renegotiation_service.Clients;
+namespace renegotiation_service.Application.Ports.Outbound;
 
 public interface IClientApiClient
 {

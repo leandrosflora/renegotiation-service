@@ -1,8 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
-using renegotiation_service.Models;
+using renegotiation_service.Application.Ports.Outbound;
+using renegotiation_service.Domain;
 
-namespace renegotiation_service.Clients;
+namespace renegotiation_service.Adapters.Outbound.Http;
 
 public class ClientApiClient(HttpClient httpClient) : IClientApiClient
 {

@@ -1,3 +1,3 @@
-namespace renegotiation_service.Models;
+namespace renegotiation_service.Domain;
 
 public record EligibilityResult(bool Eligible, string? Reason);

@@ -1,7 +1,10 @@
 using Microsoft.Extensions.Options;
-using renegotiation_service.Clients;
+using renegotiation_service.Adapters.Inbound.Http;
+using renegotiation_service.Adapters.Outbound.Http;
+using renegotiation_service.Application.Ports.Inbound;
+using renegotiation_service.Application.Ports.Outbound;
+using renegotiation_service.Application.UseCases;
 using renegotiation_service.Configuration;
-using renegotiation_service.Endpoints;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -77,6 +80,14 @@ builder.Services.AddHttpClient<IFormalizationApiClient, FormalizationApiClient>(
         options.Retry.MaxRetryAttempts = formalizationApiRetryAttempts;
         options.Retry.Delay = TimeSpan.FromMilliseconds(200);
     });
+
+builder.Services.AddScoped<IGetClientUseCase, GetClientUseCase>();
+builder.Services.AddScoped<IGetContractsUseCase, GetContractsUseCase>();
+builder.Services.AddScoped<IGetDebtsUseCase, GetDebtsUseCase>();
+builder.Services.AddScoped<IGetEligibilityUseCase, GetEligibilityUseCase>();
+builder.Services.AddScoped<ISimulateUseCase, SimulateUseCase>();
+builder.Services.AddScoped<IConfirmAgreementUseCase, ConfirmAgreementUseCase>();
+builder.Services.AddScoped<IGetDocumentUseCase, GetDocumentUseCase>();
 
 var app = builder.Build();
 

@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace renegotiation_service.Models;
+namespace renegotiation_service.Domain;
 
 public class SimulationRequest
 {

@@ -1,7 +1,7 @@
-using renegotiation_service.Clients;
-using renegotiation_service.Models;
+using renegotiation_service.Application;
+using renegotiation_service.Application.Ports.Inbound;
 
-namespace renegotiation_service.Endpoints;
+namespace renegotiation_service.Adapters.Inbound.Http;
 
 public static class ClientLookupEndpoints
 {
@@ -16,54 +16,54 @@ public static class ClientLookupEndpoints
 
     private static async Task<IResult> HandleGetClientAsync(
         string cpf,
-        IClientApiClient client,
+        IGetClientUseCase useCase,
         ILogger<ClientLookupLogCategory> logger,
         CancellationToken cancellationToken)
     {
         try
         {
-            var data = await client.GetClientAsync(cpf, cancellationToken);
-            return Results.Ok(new ClientLookupResult(data is not null, data));
+            var result = await useCase.ExecuteAsync(cpf, cancellationToken);
+            return Results.Ok(result);
         }
-        catch (Exception ex)
+        catch (UpstreamServiceUnavailableException ex)
         {
-            logger.LogWarning("Client API call failed after retries ({ExceptionType})", ex.GetType().Name);
+            logger.LogWarning("{ServiceName} call failed after retries ({ExceptionType})", ex.ServiceName, ex.InnerException?.GetType().Name);
             return Results.Json(new ErrorResponse("Client API unavailable"), statusCode: StatusCodes.Status502BadGateway);
         }
     }
 
     private static async Task<IResult> HandleGetContractsAsync(
         string clientId,
-        IClientApiClient client,
+        IGetContractsUseCase useCase,
         ILogger<ClientLookupLogCategory> logger,
         CancellationToken cancellationToken)
     {
         try
         {
-            var contracts = await client.GetContractsAsync(clientId, cancellationToken);
-            return Results.Ok(new ContractsResult(contracts is not null, contracts ?? []));
+            var result = await useCase.ExecuteAsync(clientId, cancellationToken);
+            return Results.Ok(result);
         }
-        catch (Exception ex)
+        catch (UpstreamServiceUnavailableException ex)
         {
-            logger.LogWarning("Client API call failed after retries ({ExceptionType})", ex.GetType().Name);
+            logger.LogWarning("{ServiceName} call failed after retries ({ExceptionType})", ex.ServiceName, ex.InnerException?.GetType().Name);
             return Results.Json(new ErrorResponse("Client API unavailable"), statusCode: StatusCodes.Status502BadGateway);
         }
     }
 
     private static async Task<IResult> HandleGetDebtsAsync(
         string contractId,
-        IClientApiClient client,
+        IGetDebtsUseCase useCase,
         ILogger<ClientLookupLogCategory> logger,
         CancellationToken cancellationToken)
     {
         try
         {
-            var debts = await client.GetDebtsAsync(contractId, cancellationToken);
-            return Results.Ok(new DebtsResult(debts is not null, debts ?? []));
+            var result = await useCase.ExecuteAsync(contractId, cancellationToken);
+            return Results.Ok(result);
         }
-        catch (Exception ex)
+        catch (UpstreamServiceUnavailableException ex)
         {
-            logger.LogWarning("Client API call failed after retries ({ExceptionType})", ex.GetType().Name);
+            logger.LogWarning("{ServiceName} call failed after retries ({ExceptionType})", ex.ServiceName, ex.InnerException?.GetType().Name);
             return Results.Json(new ErrorResponse("Client API unavailable"), statusCode: StatusCodes.Status502BadGateway);
         }
     }

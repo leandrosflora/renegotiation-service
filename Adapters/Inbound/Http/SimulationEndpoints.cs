@@ -1,7 +1,8 @@
-using renegotiation_service.Clients;
-using renegotiation_service.Models;
+using renegotiation_service.Application;
+using renegotiation_service.Application.Ports.Inbound;
+using renegotiation_service.Domain;
 
-namespace renegotiation_service.Endpoints;
+namespace renegotiation_service.Adapters.Inbound.Http;
 
 public static class SimulationEndpoints
 {
@@ -14,18 +15,18 @@ public static class SimulationEndpoints
     private static async Task<IResult> HandleSimulateAsync(
         string contractId,
         SimulationRequest request,
-        IContractingApiClient client,
+        ISimulateUseCase useCase,
         ILogger<SimulationLogCategory> logger,
         CancellationToken cancellationToken)
     {
         try
         {
-            var result = await client.SimulateAsync(contractId, request, cancellationToken);
+            var result = await useCase.ExecuteAsync(contractId, request, cancellationToken);
             return Results.Ok(result);
         }
-        catch (Exception ex)
+        catch (UpstreamServiceUnavailableException ex)
         {
-            logger.LogWarning("Contracting API call failed after retries ({ExceptionType})", ex.GetType().Name);
+            logger.LogWarning("{ServiceName} call failed after retries ({ExceptionType})", ex.ServiceName, ex.InnerException?.GetType().Name);
             return Results.Json(
                 new ErrorResponse("Contracting API unavailable"), statusCode: StatusCodes.Status502BadGateway);
         }
