@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Options;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using renegotiation_service.Adapters.Inbound.Http;
 using renegotiation_service.Adapters.Outbound.Http;
 using renegotiation_service.Application.Ports.Inbound;
@@ -31,6 +33,17 @@ builder.Services.AddOptions<ContractingApiOptions>()
     .Bind(builder.Configuration.GetSection(ContractingApiOptions.SectionName));
 builder.Services.AddOptions<FormalizationApiOptions>()
     .Bind(builder.Configuration.GetSection(FormalizationApiOptions.SectionName));
+builder.Services.AddOptions<OtelOptions>()
+    .Bind(builder.Configuration.GetSection(OtelOptions.SectionName));
+
+var otelEndpoint = builder.Configuration.GetSection(OtelOptions.SectionName).Get<OtelOptions>()?.OtlpEndpoint
+    ?? "http://localhost:4317";
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(resource => resource.AddService("renegotiation-service"))
+    .WithTracing(tracing => tracing
+        .AddAspNetCoreInstrumentation()
+        .AddHttpClientInstrumentation()
+        .AddOtlpExporter(otlp => otlp.Endpoint = new Uri(otelEndpoint)));
 
 var clientApiRetryAttempts = builder.Configuration.GetValue($"{ClientApiOptions.SectionName}:RetryAttempts", 2);
 var eligibilityApiRetryAttempts = builder.Configuration.GetValue($"{EligibilityApiOptions.SectionName}:RetryAttempts", 2);
