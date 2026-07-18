@@ -34,7 +34,7 @@ builder.Services.AddOpenTelemetry()
         .AddHttpClientInstrumentation()
         .AddOtlpExporter(otlp => otlp.Endpoint = new Uri(otelEndpoint)));
 
-static IHttpClientBuilder AddCoreClient<TClient, TImplementation, TOptions>(
+static void AddCoreClient<TClient, TImplementation, TOptions>(
     IServiceCollection services,
     int retryAttempts,
     Func<TOptions, string> resolveUrl)
@@ -42,7 +42,7 @@ static IHttpClientBuilder AddCoreClient<TClient, TImplementation, TOptions>(
     where TImplementation : class, TClient
     where TOptions : class
 {
-    return services.AddHttpClient<TClient, TImplementation>((sp, client) =>
+    services.AddHttpClient<TClient, TImplementation>((sp, client) =>
         {
             var options = sp.GetRequiredService<IOptions<TOptions>>().Value;
             client.BaseAddress = new Uri(resolveUrl(options));
