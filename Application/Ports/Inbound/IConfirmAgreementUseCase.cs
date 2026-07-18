@@ -4,5 +4,8 @@ namespace renegotiation_service.Application.Ports.Inbound;
 
 public interface IConfirmAgreementUseCase
 {
-    Task<AgreementConfirmationResult> ExecuteAsync(string simulationId, CancellationToken cancellationToken);
+    Task<AgreementConfirmationResult> ExecuteAsync(
+        string simulationId,
+        string idempotencyKey,
+        CancellationToken cancellationToken);
 }
