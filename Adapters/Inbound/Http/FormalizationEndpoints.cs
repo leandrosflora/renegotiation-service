@@ -15,18 +15,25 @@ public static class FormalizationEndpoints
 
     private static async Task<IResult> HandleConfirmAsync(
         string simulationId,
+        HttpRequest httpRequest,
         IConfirmAgreementUseCase useCase,
         ILogger<FormalizationLogCategory> logger,
         CancellationToken cancellationToken)
     {
+        var idempotencyKey = httpRequest.Headers["Idempotency-Key"].ToString();
+        if (string.IsNullOrWhiteSpace(idempotencyKey))
+        {
+            return Results.BadRequest(new { error = "Idempotency-Key header is required." });
+        }
+
         try
         {
-            var result = await useCase.ExecuteAsync(simulationId, cancellationToken);
+            var result = await useCase.ExecuteAsync(simulationId, idempotencyKey, cancellationToken);
             return Results.Ok(result);
         }
         catch (UpstreamServiceUnavailableException ex)
         {
-            logger.LogWarning("{ServiceName} call failed after retries ({ExceptionType})", ex.ServiceName, ex.InnerException?.GetType().Name);
+            logger.LogWarning("{ServiceName} call failed ({ExceptionType})", ex.ServiceName, ex.InnerException?.GetType().Name);
             return Results.Json(
                 new ErrorResponse("Formalization API unavailable"), statusCode: StatusCodes.Status502BadGateway);
         }
