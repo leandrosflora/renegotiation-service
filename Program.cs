@@ -8,30 +8,22 @@ using renegotiation_service.Application.Ports.Inbound;
 using renegotiation_service.Application.Ports.Outbound;
 using renegotiation_service.Application.UseCases;
 using renegotiation_service.Configuration;
+using renegotiation_service.Platform;
 
 var builder = WebApplication.CreateBuilder(args);
-
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddPlatform(builder.Configuration);
 
-builder.Logging.Configure(options =>
-{
-    options.ActivityTrackingOptions = ActivityTrackingOptions.TraceId
-        | ActivityTrackingOptions.SpanId
-        | ActivityTrackingOptions.ParentId;
-});
+builder.Logging.Configure(options => options.ActivityTrackingOptions =
+    ActivityTrackingOptions.TraceId | ActivityTrackingOptions.SpanId | ActivityTrackingOptions.ParentId);
 builder.Logging.AddSimpleConsole(options => options.IncludeScopes = true);
 
-builder.Services.AddOptions<ClientApiOptions>()
-    .Bind(builder.Configuration.GetSection(ClientApiOptions.SectionName));
-builder.Services.AddOptions<EligibilityApiOptions>()
-    .Bind(builder.Configuration.GetSection(EligibilityApiOptions.SectionName));
-builder.Services.AddOptions<ContractingApiOptions>()
-    .Bind(builder.Configuration.GetSection(ContractingApiOptions.SectionName));
-builder.Services.AddOptions<FormalizationApiOptions>()
-    .Bind(builder.Configuration.GetSection(FormalizationApiOptions.SectionName));
-builder.Services.AddOptions<OtelOptions>()
-    .Bind(builder.Configuration.GetSection(OtelOptions.SectionName));
+builder.Services.AddOptions<ClientApiOptions>().Bind(builder.Configuration.GetSection(ClientApiOptions.SectionName));
+builder.Services.AddOptions<EligibilityApiOptions>().Bind(builder.Configuration.GetSection(EligibilityApiOptions.SectionName));
+builder.Services.AddOptions<ContractingApiOptions>().Bind(builder.Configuration.GetSection(ContractingApiOptions.SectionName));
+builder.Services.AddOptions<FormalizationApiOptions>().Bind(builder.Configuration.GetSection(FormalizationApiOptions.SectionName));
+builder.Services.AddOptions<OtelOptions>().Bind(builder.Configuration.GetSection(OtelOptions.SectionName));
 
 var otelEndpoint = builder.Configuration.GetSection(OtelOptions.SectionName).Get<OtelOptions>()?.OtlpEndpoint
     ?? "http://localhost:4317";
@@ -42,58 +34,46 @@ builder.Services.AddOpenTelemetry()
         .AddHttpClientInstrumentation()
         .AddOtlpExporter(otlp => otlp.Endpoint = new Uri(otelEndpoint)));
 
-var clientApiRetryAttempts = builder.Configuration.GetValue($"{ClientApiOptions.SectionName}:RetryAttempts", 2);
-var eligibilityApiRetryAttempts = builder.Configuration.GetValue($"{EligibilityApiOptions.SectionName}:RetryAttempts", 2);
-var contractingApiRetryAttempts = builder.Configuration.GetValue($"{ContractingApiOptions.SectionName}:RetryAttempts", 2);
-var formalizationApiRetryAttempts = builder.Configuration.GetValue($"{FormalizationApiOptions.SectionName}:RetryAttempts", 2);
+static IHttpClientBuilder AddCoreClient<TClient, TImplementation, TOptions>(
+    IServiceCollection services,
+    int retryAttempts,
+    Func<TOptions, string> resolveUrl)
+    where TClient : class
+    where TImplementation : class, TClient
+    where TOptions : class
+{
+    return services.AddHttpClient<TClient, TImplementation>((sp, client) =>
+        {
+            var options = sp.GetRequiredService<IOptions<TOptions>>().Value;
+            client.BaseAddress = new Uri(resolveUrl(options));
+        })
+        .AddHttpMessageHandler(sp => new InternalRequestHandler(
+            sp.GetRequiredService<InternalTokenService>(),
+            sp.GetRequiredService<TenantContext>()))
+        .AddStandardResilienceHandler(options =>
+        {
+            options.Retry.MaxRetryAttempts = retryAttempts;
+            options.Retry.Delay = TimeSpan.FromMilliseconds(200);
+            options.Retry.DisableForUnsafeHttpMethods();
+        });
+}
 
-builder.Services.AddHttpClient<IClientApiClient, ClientApiClient>((sp, client) =>
-    {
-        var options = sp.GetRequiredService<IOptions<ClientApiOptions>>().Value;
-        client.BaseAddress = new Uri(options.BaseUrl);
-    })
-    .AddStandardResilienceHandler(options =>
-    {
-        options.Retry.MaxRetryAttempts = clientApiRetryAttempts;
-        options.Retry.Delay = TimeSpan.FromMilliseconds(200);
-        options.Retry.DisableForUnsafeHttpMethods();
-    });
-
-builder.Services.AddHttpClient<IEligibilityApiClient, EligibilityApiClient>((sp, client) =>
-    {
-        var options = sp.GetRequiredService<IOptions<EligibilityApiOptions>>().Value;
-        client.BaseAddress = new Uri(options.BaseUrl);
-    })
-    .AddStandardResilienceHandler(options =>
-    {
-        options.Retry.MaxRetryAttempts = eligibilityApiRetryAttempts;
-        options.Retry.Delay = TimeSpan.FromMilliseconds(200);
-        options.Retry.DisableForUnsafeHttpMethods();
-    });
-
-builder.Services.AddHttpClient<IContractingApiClient, ContractingApiClient>((sp, client) =>
-    {
-        var options = sp.GetRequiredService<IOptions<ContractingApiOptions>>().Value;
-        client.BaseAddress = new Uri(options.BaseUrl);
-    })
-    .AddStandardResilienceHandler(options =>
-    {
-        options.Retry.MaxRetryAttempts = contractingApiRetryAttempts;
-        options.Retry.Delay = TimeSpan.FromMilliseconds(200);
-        options.Retry.DisableForUnsafeHttpMethods();
-    });
-
-builder.Services.AddHttpClient<IFormalizationApiClient, FormalizationApiClient>((sp, client) =>
-    {
-        var options = sp.GetRequiredService<IOptions<FormalizationApiOptions>>().Value;
-        client.BaseAddress = new Uri(options.BaseUrl);
-    })
-    .AddStandardResilienceHandler(options =>
-    {
-        options.Retry.MaxRetryAttempts = formalizationApiRetryAttempts;
-        options.Retry.Delay = TimeSpan.FromMilliseconds(200);
-        options.Retry.DisableForUnsafeHttpMethods();
-    });
+AddCoreClient<IClientApiClient, ClientApiClient, ClientApiOptions>(
+    builder.Services,
+    builder.Configuration.GetValue($"{ClientApiOptions.SectionName}:RetryAttempts", 2),
+    options => options.BaseUrl);
+AddCoreClient<IEligibilityApiClient, EligibilityApiClient, EligibilityApiOptions>(
+    builder.Services,
+    builder.Configuration.GetValue($"{EligibilityApiOptions.SectionName}:RetryAttempts", 2),
+    options => options.BaseUrl);
+AddCoreClient<IContractingApiClient, ContractingApiClient, ContractingApiOptions>(
+    builder.Services,
+    builder.Configuration.GetValue($"{ContractingApiOptions.SectionName}:RetryAttempts", 2),
+    options => options.BaseUrl);
+AddCoreClient<IFormalizationApiClient, FormalizationApiClient, FormalizationApiOptions>(
+    builder.Services,
+    builder.Configuration.GetValue($"{FormalizationApiOptions.SectionName}:RetryAttempts", 2),
+    options => options.BaseUrl);
 
 builder.Services.AddScoped<IGetClientUseCase, GetClientUseCase>();
 builder.Services.AddScoped<IGetContractsUseCase, GetContractsUseCase>();
@@ -104,7 +84,6 @@ builder.Services.AddScoped<IConfirmAgreementUseCase, ConfirmAgreementUseCase>();
 builder.Services.AddScoped<IGetDocumentUseCase, GetDocumentUseCase>();
 
 var app = builder.Build();
-
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -112,22 +91,20 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-
-app.Use(async (context, next) =>
+app.UsePlatform();
+app.MapGet("/health/ready", (IOptions<InternalAuthOptions> authOptions) =>
 {
-    var logger = context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("CorrelationId");
-    var correlationId = Guid.NewGuid().ToString("n");
-    using (logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId }))
-    {
-        await next(context);
-    }
-});
+    var failures = new List<string>();
+    if (string.IsNullOrWhiteSpace(authOptions.Value.SigningKey)) failures.Add("internal_auth_signing_key_missing");
+    return failures.Count == 0
+        ? Results.Ok(new { status = "ready", failures })
+        : Results.Json(new { status = "not_ready", failures }, statusCode: 503);
+}).AllowAnonymous();
 
 app.MapClientLookupEndpoints();
 app.MapEligibilityEndpoints();
 app.MapSimulationEndpoints();
 app.MapFormalizationEndpoints();
-
 app.Run();
 
 public partial class Program;
