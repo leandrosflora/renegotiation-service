@@ -6,11 +6,14 @@ namespace renegotiation_service.Application.UseCases;
 
 public class ConfirmAgreementUseCase(IFormalizationApiClient client) : IConfirmAgreementUseCase
 {
-    public async Task<AgreementConfirmationResult> ExecuteAsync(string simulationId, CancellationToken cancellationToken)
+    public async Task<AgreementConfirmationResult> ExecuteAsync(
+        string simulationId,
+        string idempotencyKey,
+        CancellationToken cancellationToken)
     {
         try
         {
-            return await client.ConfirmAsync(simulationId, cancellationToken);
+            return await client.ConfirmAsync(simulationId, idempotencyKey, cancellationToken);
         }
         catch (Exception ex)
         {
