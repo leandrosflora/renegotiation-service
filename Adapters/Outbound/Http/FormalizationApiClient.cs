@@ -6,10 +6,17 @@ namespace renegotiation_service.Adapters.Outbound.Http;
 
 public class FormalizationApiClient(HttpClient httpClient) : IFormalizationApiClient
 {
-    public async Task<AgreementConfirmationResult> ConfirmAsync(string simulationId, CancellationToken cancellationToken)
+    public async Task<AgreementConfirmationResult> ConfirmAsync(
+        string simulationId,
+        string idempotencyKey,
+        CancellationToken cancellationToken)
     {
-        using var response = await httpClient.PostAsync(
-            $"/simulations/{simulationId}/confirmations", content: null, cancellationToken);
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/simulations/{simulationId}/confirmations");
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
+
+        using var response = await httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         var result = await response.Content.ReadFromJsonAsync<AgreementConfirmationResult>(cancellationToken: cancellationToken);
