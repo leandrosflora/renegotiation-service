@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Http.Resilience;
 using Microsoft.Extensions.Options;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -10,13 +11,9 @@ using renegotiation_service.Configuration;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// Attach distributed-trace IDs to every log scope and render scopes in console output,
-// so a single request can be correlated across an endpoint and its underlying HTTP client call.
 builder.Logging.Configure(options =>
 {
     options.ActivityTrackingOptions = ActivityTrackingOptions.TraceId
@@ -59,6 +56,7 @@ builder.Services.AddHttpClient<IClientApiClient, ClientApiClient>((sp, client) =
     {
         options.Retry.MaxRetryAttempts = clientApiRetryAttempts;
         options.Retry.Delay = TimeSpan.FromMilliseconds(200);
+        options.Retry.DisableForUnsafeHttpMethods();
     });
 
 builder.Services.AddHttpClient<IEligibilityApiClient, EligibilityApiClient>((sp, client) =>
@@ -70,6 +68,7 @@ builder.Services.AddHttpClient<IEligibilityApiClient, EligibilityApiClient>((sp,
     {
         options.Retry.MaxRetryAttempts = eligibilityApiRetryAttempts;
         options.Retry.Delay = TimeSpan.FromMilliseconds(200);
+        options.Retry.DisableForUnsafeHttpMethods();
     });
 
 builder.Services.AddHttpClient<IContractingApiClient, ContractingApiClient>((sp, client) =>
@@ -81,6 +80,7 @@ builder.Services.AddHttpClient<IContractingApiClient, ContractingApiClient>((sp,
     {
         options.Retry.MaxRetryAttempts = contractingApiRetryAttempts;
         options.Retry.Delay = TimeSpan.FromMilliseconds(200);
+        options.Retry.DisableForUnsafeHttpMethods();
     });
 
 builder.Services.AddHttpClient<IFormalizationApiClient, FormalizationApiClient>((sp, client) =>
@@ -92,6 +92,7 @@ builder.Services.AddHttpClient<IFormalizationApiClient, FormalizationApiClient>(
     {
         options.Retry.MaxRetryAttempts = formalizationApiRetryAttempts;
         options.Retry.Delay = TimeSpan.FromMilliseconds(200);
+        options.Retry.DisableForUnsafeHttpMethods();
     });
 
 builder.Services.AddScoped<IGetClientUseCase, GetClientUseCase>();
@@ -104,7 +105,6 @@ builder.Services.AddScoped<IGetDocumentUseCase, GetDocumentUseCase>();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
