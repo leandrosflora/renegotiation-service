@@ -1,29 +1,46 @@
 using renegotiation_service.Application;
 using renegotiation_service.Application.Ports.Inbound;
+using renegotiation_service.Platform;
 
 namespace renegotiation_service.Adapters.Inbound.Http;
 
 public static class FormalizationEndpoints
 {
+    private static readonly HashSet<string> ConfirmationStages =
+    [
+        "ProposalSelected",
+        "ConfirmationPending"
+    ];
+
     public static IEndpointRouteBuilder MapFormalizationEndpoints(this IEndpointRouteBuilder endpoints)
     {
         endpoints.MapPost("/simulations/{simulationId}/confirmations", HandleConfirmAsync);
         endpoints.MapGet("/agreements/{agreementId}/document", HandleGetDocumentAsync);
-
         return endpoints;
     }
 
     private static async Task<IResult> HandleConfirmAsync(
         string simulationId,
-        HttpRequest httpRequest,
+        HttpContext httpContext,
         IConfirmAgreementUseCase useCase,
         ILogger<FormalizationLogCategory> logger,
         CancellationToken cancellationToken)
     {
-        var idempotencyKey = httpRequest.Headers["Idempotency-Key"].ToString();
+        var idempotencyKey = httpContext.Request.Headers["Idempotency-Key"].ToString();
         if (string.IsNullOrWhiteSpace(idempotencyKey))
         {
             return Results.BadRequest(new { error = "Idempotency-Key header is required." });
+        }
+        if (!GovernedToolPolicy.TryAuthorize(
+                httpContext,
+                "confirmar_acordo",
+                ConfirmationStages,
+                idempotencyKey,
+                requireExplicitConfirmation: true,
+                out _,
+                out var policyError))
+        {
+            return Results.Json(new { error = policyError }, statusCode: StatusCodes.Status403Forbidden);
         }
 
         try

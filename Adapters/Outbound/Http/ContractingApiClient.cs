@@ -7,10 +7,19 @@ namespace renegotiation_service.Adapters.Outbound.Http;
 public class ContractingApiClient(HttpClient httpClient) : IContractingApiClient
 {
     public async Task<SimulationResult> SimulateAsync(
-        string contractId, SimulationRequest request, CancellationToken cancellationToken)
+        string contractId,
+        SimulationRequest request,
+        string idempotencyKey,
+        CancellationToken cancellationToken)
     {
-        using var response = await httpClient.PostAsJsonAsync(
-            $"/contracts/{contractId}/simulations", request, cancellationToken);
+        using var httpRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/contracts/{contractId}/simulations")
+        {
+            Content = JsonContent.Create(request)
+        };
+        httpRequest.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
+        using var response = await httpClient.SendAsync(httpRequest, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         var result = await response.Content.ReadFromJsonAsync<SimulationResult>(cancellationToken: cancellationToken);
