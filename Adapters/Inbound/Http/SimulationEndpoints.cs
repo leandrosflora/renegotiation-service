@@ -1,11 +1,19 @@
 using renegotiation_service.Application;
 using renegotiation_service.Application.Ports.Inbound;
 using renegotiation_service.Domain;
+using renegotiation_service.Platform;
 
 namespace renegotiation_service.Adapters.Inbound.Http;
 
 public static class SimulationEndpoints
 {
+    private static readonly HashSet<string> AllowedStages =
+    [
+        "ContractSelected",
+        "EligibilityChecked",
+        "SimulationParametersPending"
+    ];
+
     public static IEndpointRouteBuilder MapSimulationEndpoints(this IEndpointRouteBuilder endpoints)
     {
         endpoints.MapPost("/contracts/{contractId}/simulations", HandleSimulateAsync);
@@ -15,15 +23,26 @@ public static class SimulationEndpoints
     private static async Task<IResult> HandleSimulateAsync(
         string contractId,
         SimulationRequest request,
-        HttpRequest httpRequest,
+        HttpContext httpContext,
         ISimulateUseCase useCase,
         ILogger<SimulationLogCategory> logger,
         CancellationToken cancellationToken)
     {
-        var idempotencyKey = httpRequest.Headers["Idempotency-Key"].ToString();
+        var idempotencyKey = httpContext.Request.Headers["Idempotency-Key"].ToString();
         if (string.IsNullOrWhiteSpace(idempotencyKey))
         {
             return Results.BadRequest(new { error = "Idempotency-Key header is required." });
+        }
+        if (!GovernedToolPolicy.TryAuthorize(
+                httpContext,
+                "simular_proposta",
+                AllowedStages,
+                idempotencyKey,
+                requireExplicitConfirmation: false,
+                out _,
+                out var policyError))
+        {
+            return Results.Json(new { error = policyError }, statusCode: StatusCodes.Status403Forbidden);
         }
 
         try
