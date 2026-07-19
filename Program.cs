@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.Extensions.Http.Resilience;
 using Microsoft.Extensions.Options;
 using Npgsql;
