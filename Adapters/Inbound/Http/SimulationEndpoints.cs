@@ -15,20 +15,40 @@ public static class SimulationEndpoints
     private static async Task<IResult> HandleSimulateAsync(
         string contractId,
         SimulationRequest request,
+        HttpRequest httpRequest,
         ISimulateUseCase useCase,
         ILogger<SimulationLogCategory> logger,
         CancellationToken cancellationToken)
     {
+        var idempotencyKey = httpRequest.Headers["Idempotency-Key"].ToString();
+        if (string.IsNullOrWhiteSpace(idempotencyKey))
+        {
+            return Results.BadRequest(new { error = "Idempotency-Key header is required." });
+        }
+
         try
         {
-            var result = await useCase.ExecuteAsync(contractId, request, cancellationToken);
+            var result = await useCase.ExecuteAsync(
+                contractId,
+                request,
+                idempotencyKey,
+                cancellationToken);
             return Results.Ok(result);
+        }
+        catch (IdempotencyInProgressException ex)
+        {
+            return Results.Conflict(new { error = ex.Message, retryable = true });
+        }
+        catch (IdempotencyConflictException ex)
+        {
+            return Results.Conflict(new { error = ex.Message, retryable = false });
         }
         catch (UpstreamServiceUnavailableException ex)
         {
-            logger.LogWarning("{ServiceName} call failed after retries ({ExceptionType})", ex.ServiceName, ex.InnerException?.GetType().Name);
+            logger.LogWarning("{ServiceName} call failed ({ExceptionType})", ex.ServiceName, ex.InnerException?.GetType().Name);
             return Results.Json(
-                new ErrorResponse("Contracting API unavailable"), statusCode: StatusCodes.Status502BadGateway);
+                new ErrorResponse("Contracting API unavailable"),
+                statusCode: StatusCodes.Status502BadGateway);
         }
     }
 }
