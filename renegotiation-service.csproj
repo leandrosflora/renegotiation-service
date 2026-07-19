@@ -6,6 +6,15 @@
     <RootNamespace>renegotiation_service</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <!-- renegotiation-service.Tests lives inside this project's directory tree (moved in
+         2026-07-19 so both projects share one repo/CI run) - the SDK's default glob would
+         otherwise sweep its .cs files into this project's compile items too. -->
+    <Compile Remove="renegotiation-service.Tests\**" />
+    <Content Remove="renegotiation-service.Tests\**" />
+    <EmbeddedResource Remove="renegotiation-service.Tests\**" />
+    <None Remove="renegotiation-service.Tests\**" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.28" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.28" />
     <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.7.0" />
