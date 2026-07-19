@@ -28,16 +28,7 @@ public sealed class PostgresSimulationIdempotencyStore(
             VALUES
                 (@tenant_id, @operation, @idempotency_key, @request_hash, 'processing',
                  now() + make_interval(secs => @lease_seconds), 1, now(), now())
-            ON CONFLICT (tenant_id, operation, idempotency_key) DO UPDATE
-            SET status = 'processing',
-                lease_until = EXCLUDED.lease_until,
-                attempt_count = ops.renegotiation_idempotency.attempt_count + 1,
-                last_error = NULL,
-                updated_at = now()
-            WHERE ops.renegotiation_idempotency.request_hash = EXCLUDED.request_hash
-              AND (ops.renegotiation_idempotency.status = 'failed'
-                   OR (ops.renegotiation_idempotency.status = 'processing'
-                       AND ops.renegotiation_idempotency.lease_until < now()))
+            ON CONFLICT (tenant_id, operation, idempotency_key) DO NOTHING
             RETURNING status;
             """;
 
