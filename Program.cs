@@ -1,9 +1,11 @@
 using Microsoft.Extensions.Http.Resilience;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using renegotiation_service.Adapters.Inbound.Http;
 using renegotiation_service.Adapters.Outbound.Http;
+using renegotiation_service.Adapters.Outbound.Persistence;
 using renegotiation_service.Application.Ports.Inbound;
 using renegotiation_service.Application.Ports.Outbound;
 using renegotiation_service.Application.UseCases;
@@ -24,6 +26,7 @@ builder.Services.AddOptions<EligibilityApiOptions>().Bind(builder.Configuration.
 builder.Services.AddOptions<ContractingApiOptions>().Bind(builder.Configuration.GetSection(ContractingApiOptions.SectionName));
 builder.Services.AddOptions<FormalizationApiOptions>().Bind(builder.Configuration.GetSection(FormalizationApiOptions.SectionName));
 builder.Services.AddOptions<OtelOptions>().Bind(builder.Configuration.GetSection(OtelOptions.SectionName));
+builder.Services.AddOptions<PostgresOptions>().Bind(builder.Configuration.GetSection(PostgresOptions.SectionName));
 
 var otelEndpoint = builder.Configuration.GetSection(OtelOptions.SectionName).Get<OtelOptions>()?.OtlpEndpoint
     ?? "http://localhost:4317";
@@ -32,7 +35,20 @@ builder.Services.AddOpenTelemetry()
     .WithTracing(tracing => tracing
         .AddAspNetCoreInstrumentation()
         .AddHttpClientInstrumentation()
+        .AddNpgsql()
         .AddOtlpExporter(otlp => otlp.Endpoint = new Uri(otelEndpoint)));
+
+builder.Services.AddSingleton<NpgsqlDataSource>(sp =>
+{
+    var options = sp.GetRequiredService<IOptions<PostgresOptions>>().Value;
+    var connectionString = new NpgsqlConnectionStringBuilder(options.ConnectionString)
+    {
+        Timeout = 5,
+        CommandTimeout = 5
+    };
+    return new NpgsqlDataSourceBuilder(connectionString.ConnectionString).Build();
+});
+builder.Services.AddSingleton<ISimulationIdempotencyStore, PostgresSimulationIdempotencyStore>();
 
 static void AddCoreClient<TClient, TImplementation, TOptions>(
     IServiceCollection services,
@@ -92,10 +108,26 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UsePlatform();
-app.MapGet("/health/ready", (IOptions<InternalAuthOptions> authOptions) =>
+app.MapGet("/health/ready", async (
+    IOptions<InternalAuthOptions> authOptions,
+    NpgsqlDataSource dataSource,
+    CancellationToken cancellationToken) =>
 {
     var failures = new List<string>();
-    if (string.IsNullOrWhiteSpace(authOptions.Value.SigningKey)) failures.Add("internal_auth_signing_key_missing");
+    if (Encoding.UTF8.GetByteCount(authOptions.Value.SigningKey) < 32)
+    {
+        failures.Add("internal_auth_signing_key_invalid");
+    }
+    try
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("SELECT 1", connection);
+        await command.ExecuteScalarAsync(cancellationToken);
+    }
+    catch
+    {
+        failures.Add("postgres_unavailable");
+    }
     return failures.Count == 0
         ? Results.Ok(new { status = "ready", failures })
         : Results.Json(new { status = "not_ready", failures }, statusCode: 503);
