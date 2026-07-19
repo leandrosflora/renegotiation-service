@@ -50,7 +50,7 @@ public sealed class PostgresSimulationIdempotencyStore(
         }
 
         const string selectSql = """
-            SELECT request_hash, status, response::text
+            SELECT request_hash, status, response::text, lease_until
             FROM ops.renegotiation_idempotency
             WHERE tenant_id = @tenant_id
               AND operation = @operation
@@ -68,6 +68,9 @@ public sealed class PostgresSimulationIdempotencyStore(
         var existingHash = reader.GetString(0);
         var status = reader.GetString(1);
         var responseJson = reader.IsDBNull(2) ? null : reader.GetString(2);
+        var leaseUntil = reader.IsDBNull(3)
+            ? (DateTimeOffset?)null
+            : reader.GetFieldValue<DateTimeOffset>(3);
         await reader.DisposeAsync();
         await transaction.CommitAsync(cancellationToken);
 
@@ -78,8 +81,10 @@ public sealed class PostgresSimulationIdempotencyStore(
         return status switch
         {
             "completed" => new IdempotencyLease(IdempotencyAcquireStatus.Completed, responseJson),
+            "failed" => new IdempotencyLease(IdempotencyAcquireStatus.Ambiguous),
+            "processing" when leaseUntil is null || leaseUntil <= DateTimeOffset.UtcNow =>
+                new IdempotencyLease(IdempotencyAcquireStatus.Ambiguous),
             "processing" => new IdempotencyLease(IdempotencyAcquireStatus.InProgress),
-            "failed" => new IdempotencyLease(IdempotencyAcquireStatus.InProgress),
             _ => throw new InvalidOperationException($"Unsupported idempotency status '{status}'.")
         };
     }
