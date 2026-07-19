@@ -22,7 +22,7 @@ public class ContractingApiClientTests
         var client = BuildClient(handler);
 
         var result = await client.SimulateAsync(
-            "contract-1", new SimulationRequest { Installments = 12, DiscountPercentage = 0 }, CancellationToken.None);
+            "contract-1", new SimulationRequest { Installments = 12, DiscountPercentage = 0 }, "idem-key-1", CancellationToken.None);
 
         Assert.True(result.Possible);
         Assert.Equal("sim-1", result.Simulation!.SimulationId);
@@ -39,7 +39,7 @@ public class ContractingApiClientTests
         var client = BuildClient(handler);
 
         var result = await client.SimulateAsync(
-            "contract-1", new SimulationRequest { Installments = 999, DiscountPercentage = 0 }, CancellationToken.None);
+            "contract-1", new SimulationRequest { Installments = 999, DiscountPercentage = 0 }, "idem-key-2", CancellationToken.None);
 
         Assert.False(result.Possible);
         Assert.Equal("installments_out_of_range", result.Reason);
@@ -55,7 +55,7 @@ public class ContractingApiClientTests
         var client = BuildClient(handler, maxRetryAttempts: 2);
 
         var result = await client.SimulateAsync(
-            "contract-1", new SimulationRequest { Installments = 12, DiscountPercentage = 0 }, CancellationToken.None);
+            "contract-1", new SimulationRequest { Installments = 12, DiscountPercentage = 0 }, "idem-key-3", CancellationToken.None);
 
         Assert.True(result.Possible);
         Assert.True(handler.CallCount >= 2);
@@ -68,7 +68,7 @@ public class ContractingApiClientTests
         var client = BuildClient(handler);
 
         await Assert.ThrowsAsync<HttpRequestException>(() => client.SimulateAsync(
-            "contract-1", new SimulationRequest { Installments = 12, DiscountPercentage = 0 }, CancellationToken.None));
+            "contract-1", new SimulationRequest { Installments = 12, DiscountPercentage = 0 }, "idem-key-4", CancellationToken.None));
     }
 
     private static IContractingApiClient BuildClient(StubHttpMessageHandler handler, int maxRetryAttempts = 0)

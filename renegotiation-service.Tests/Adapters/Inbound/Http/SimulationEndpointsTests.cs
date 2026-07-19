@@ -27,7 +27,7 @@ public class SimulationEndpointsTests : IClassFixture<WebApplicationFactory<Prog
     public async Task PostSimulation_Possible_ReturnsOkWithSimulationId()
     {
         var client = new Mock<IContractingApiClient>();
-        client.Setup(c => c.SimulateAsync("contract-1", It.IsAny<SimulationRequest>(), It.IsAny<CancellationToken>()))
+        client.Setup(c => c.SimulateAsync("contract-1", It.IsAny<SimulationRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SimulationResult(true, null, new SimulationData("sim-1", 12, 100m, 1200m)));
         var httpClient = CreateClient(client.Object);
 
@@ -44,7 +44,7 @@ public class SimulationEndpointsTests : IClassFixture<WebApplicationFactory<Prog
     public async Task PostSimulation_NotPossible_ReturnsOkWithReason()
     {
         var client = new Mock<IContractingApiClient>();
-        client.Setup(c => c.SimulateAsync(It.IsAny<string>(), It.IsAny<SimulationRequest>(), It.IsAny<CancellationToken>()))
+        client.Setup(c => c.SimulateAsync(It.IsAny<string>(), It.IsAny<SimulationRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SimulationResult(false, "installments_out_of_range", null));
         var httpClient = CreateClient(client.Object);
 
@@ -61,7 +61,7 @@ public class SimulationEndpointsTests : IClassFixture<WebApplicationFactory<Prog
     public async Task PostSimulation_ApiUnavailable_ReturnsBadGateway()
     {
         var client = new Mock<IContractingApiClient>();
-        client.Setup(c => c.SimulateAsync(It.IsAny<string>(), It.IsAny<SimulationRequest>(), It.IsAny<CancellationToken>()))
+        client.Setup(c => c.SimulateAsync(It.IsAny<string>(), It.IsAny<SimulationRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("connection refused"));
         var httpClient = CreateClient(client.Object);
 

@@ -5,7 +5,8 @@ public enum IdempotencyAcquireStatus
     Acquired,
     InProgress,
     Completed,
-    Conflict
+    Conflict,
+    Ambiguous
 }
 
 public sealed record IdempotencyLease(
