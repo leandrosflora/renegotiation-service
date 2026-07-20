@@ -38,9 +38,26 @@ flowchart LR
 - Swagger / OpenAPI em ambiente `Development`
 - `HttpClientFactory`
 - `Microsoft.Extensions.Http.Resilience`
+- JWT interno (HS256) obrigatório em todos os endpoints (`FallbackPolicy` exige usuário autenticado)
+- PostgreSQL, usado apenas por `simular_proposta` para lease de idempotência (`ops.simulation_idempotency`)
 - Logs com `TraceId`, `SpanId`, `ParentId` e `CorrelationId`
 
+## Autenticação e autorização
+
+Todo endpoint exige `Authorization: Bearer <jwt>` (HS256, `iss=conversational-ai-platform`, `aud=renegotiation-service`) — não há endpoint público neste serviço.
+
+Além disso, **`POST /contracts/{contractId}/simulations`** e **`POST /simulations/{simulationId}/confirmations`** são "governed tools": só aceitam um token assinado pelo `tool-service-renegotiation` (`sub=tool-service-renegotiation`, `token_use=governed_tool`, `tool_name` batendo com a operação), com claims de `tenant_id`, `conversation_id`, `message_id`, `journey_stage` e `journey_version`. Esses dois endpoints também exigem um header `Idempotency-Key` que precisa bater exatamente com a claim `policy_id` assinada no token.
+
+| Operação | Estágios de jornada permitidos | Exige confirmação explícita? |
+|---|---|---|
+| `simular_proposta` | `ContractSelected`, `EligibilityChecked`, `SimulationParametersPending` | Não |
+| `confirmar_acordo` | `ProposalSelected`, `ConfirmationPending` | Sim — `confirmation_message_id` deve bater com o `message_id` da mensagem atual |
+
+Chamada fora do estágio permitido, com `Idempotency-Key` divergente da `policy_id`, ou sem evidência de confirmação quando exigida, recebe `403 Forbidden`.
+
 ## Endpoints
+
+Todos exigem `Authorization: Bearer <jwt>` (ver seção acima); os dois marcados como "governed" exigem também o token específico do `tool-service-renegotiation` e `Idempotency-Key`.
 
 ### `GET /clients/{cpf}`
 
@@ -110,9 +127,9 @@ Resposta:
 }
 ```
 
-### `POST /contracts/{contractId}/simulations`
+### `POST /contracts/{contractId}/simulations` (governed)
 
-Simula uma proposta de renegociação.
+Simula uma proposta de renegociação. Exige `Idempotency-Key` e o token `governed_tool` descrito acima; retorna `400` sem `Idempotency-Key`, `403` fora de estágio ou com chave divergente da `policy_id` assinada.
 
 Request:
 
@@ -138,9 +155,9 @@ Resposta:
 }
 ```
 
-### `POST /simulations/{simulationId}/confirmations`
+### `POST /simulations/{simulationId}/confirmations` (governed)
 
-Confirma o acordo a partir de uma simulação.
+Confirma o acordo a partir de uma simulação. Exige `Idempotency-Key`, o token `governed_tool`, e evidência de confirmação explícita (`confirmation_message_id` assinado batendo com a mensagem atual) — retorna `403` sem essa evidência.
 
 Resposta:
 
@@ -210,6 +227,16 @@ Arquivo base: `appsettings.json`.
   "FormalizationApi": {
     "BaseUrl": "http://localhost:9404",
     "RetryAttempts": 2
+  },
+  "InternalAuth": {
+    "Issuer": "conversational-ai-platform",
+    "ServiceName": "renegotiation-service",
+    "SigningKey": "",
+    "TokenTtlSeconds": 300
+  },
+  "Postgres": {
+    "ConnectionString": "Host=localhost;Port=5432;Database=conversational_ai;Username=postgres;Password=postgres",
+    "IdempotencyLeaseSeconds": 120
   }
 }
 ```
@@ -227,6 +254,8 @@ ContractingApi__BaseUrl=http://localhost:9403
 ContractingApi__RetryAttempts=2
 FormalizationApi__BaseUrl=http://localhost:9404
 FormalizationApi__RetryAttempts=2
+InternalAuth__SigningKey=<segredo-com-pelo-menos-32-bytes>
+Postgres__ConnectionString=Host=localhost;Port=5432;Database=conversational_ai;Username=postgres;Password=postgres
 ```
 
 ## Execução local
@@ -234,10 +263,9 @@ FormalizationApi__RetryAttempts=2
 Pré-requisitos:
 
 - .NET SDK 8+
-- Client API disponível
-- Eligibility API disponível
-- Contracting API disponível
-- Formalization API disponível
+- Client API, Eligibility API, Contracting API e Formalization API disponíveis
+- PostgreSQL acessível (só é usado pelo lease de idempotência de `simular_proposta`; o schema é criado automaticamente no startup)
+- `InternalAuth__SigningKey` com pelo menos 32 bytes, igual ao configurado nos serviços que chamam este
 
 Restaurar dependências:
 
@@ -249,6 +277,12 @@ Executar:
 
 ```bash
 dotnet run
+```
+
+Rodar os testes:
+
+```bash
+dotnet test
 ```
 
 URLs locais configuradas em `launchSettings.json`:
@@ -282,20 +316,33 @@ Cada client HTTP usa `AddStandardResilienceHandler` com:
 - delay inicial de 200 ms;
 - configuração default de tentativas em `RetryAttempts`.
 
+## Testes
+
+```bash
+dotnet test
+```
+
+`renegotiation-service.Tests` cobre os endpoints de simulação/formalização (incluindo a política governed-tool) e o mapeamento de erros das APIs dependentes.
+
+## CI
+
+`.github/workflows/ci.yml` roda `dotnet build`/`dotnet test` a cada push/PR para `master`, com um container Postgres efêmero (necessário pelo lease de idempotência de `simular_proposta`).
+
 ## Limitações atuais
 
-- Não há persistência local neste serviço.
 - Não há mensageria neste serviço.
-- Não há autenticação/autorização nos endpoints.
-- Não há validação explícita de CPF, `contractId`, `simulationId` ou `agreementId`.
-- Não há Dockerfile no repositório.
+- Não há validação explícita de CPF, `contractId`, `simulationId` ou `agreementId` além do que os endpoints downstream já validam.
 - O serviço depende da disponibilidade das quatro APIs downstream.
+- A única persistência local é o lease de idempotência de `simular_proposta`; os demais endpoints são stateless.
 
 ## Comandos úteis
 
 ```bash
 # Build
 dotnet build
+
+# Test
+dotnet test
 
 # Run
 dotnet run
@@ -312,13 +359,17 @@ open http://localhost:5266/swagger
 │   ├── Inbound
 │   │   └── Http
 │   └── Outbound
-│       └── Http
+│       ├── Http
+│       └── Persistence
 ├── Application
 │   ├── Ports
 │   └── UseCases
 ├── Configuration
 ├── Domain
+├── Platform
 ├── Program.cs
 ├── appsettings.json
-└── renegotiation-service.csproj
+├── Dockerfile
+├── renegotiation-service.csproj
+└── renegotiation-service.Tests/
 ```
