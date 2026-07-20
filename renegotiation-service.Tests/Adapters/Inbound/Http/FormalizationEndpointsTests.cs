@@ -135,7 +135,7 @@ public class FormalizationEndpointsTests : IClassFixture<WebApplicationFactory<P
     {
         var factory = _baseFactory.WithWebHostBuilder(builder =>
         {
-            TestAuth.ConfigureSigningKey(builder);
+            TestAuth.ConfigureInboundSecret(builder);
             builder.ConfigureTestServices(services =>
             {
                 services.RemoveAll<IFormalizationApiClient>();

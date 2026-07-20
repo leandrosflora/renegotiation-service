@@ -71,7 +71,7 @@ public class EligibilityEndpointsTests : IClassFixture<WebApplicationFactory<Pro
     {
         var factory = _baseFactory.WithWebHostBuilder(builder =>
         {
-            TestAuth.ConfigureSigningKey(builder);
+            TestAuth.ConfigureInboundSecret(builder);
             builder.ConfigureTestServices(services =>
             {
                 services.RemoveAll<IEligibilityApiClient>();
