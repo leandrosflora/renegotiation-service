@@ -86,7 +86,7 @@ public class SimulationEndpointsTests : IClassFixture<WebApplicationFactory<Prog
     {
         var factory = _baseFactory.WithWebHostBuilder(builder =>
         {
-            TestAuth.ConfigureSigningKey(builder);
+            TestAuth.ConfigureInboundSecret(builder);
             builder.ConfigureTestServices(services =>
             {
                 services.RemoveAll<IContractingApiClient>();

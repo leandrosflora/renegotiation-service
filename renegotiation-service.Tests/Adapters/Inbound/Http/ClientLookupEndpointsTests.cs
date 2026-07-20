@@ -104,7 +104,7 @@ public class ClientLookupEndpointsTests : IClassFixture<WebApplicationFactory<Pr
     {
         var factory = _baseFactory.WithWebHostBuilder(builder =>
         {
-            TestAuth.ConfigureSigningKey(builder);
+            TestAuth.ConfigureInboundSecret(builder);
             builder.ConfigureTestServices(services =>
             {
                 services.RemoveAll<IClientApiClient>();

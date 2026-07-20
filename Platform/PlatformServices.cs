@@ -6,8 +6,10 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using JsonWebToken = Microsoft.IdentityModel.JsonWebTokens.JsonWebToken;
 
 namespace renegotiation_service.Platform;
 
@@ -16,8 +18,12 @@ public sealed class InternalAuthOptions
     public const string SectionName = "InternalAuth";
     public string Issuer { get; init; } = "conversational-ai-platform";
     public string ServiceName { get; init; } = "renegotiation-service";
-    public string SigningKey { get; init; } = string.Empty;
     public int TokenTtlSeconds { get; init; } = 300;
+    public Dictionary<string, string> OutboundSecrets { get; init; } = new();
+    public Dictionary<string, string> InboundSecrets { get; init; } = new();
+
+    public static bool HasValidSecret(string? secret) =>
+        !string.IsNullOrEmpty(secret) && Encoding.UTF8.GetByteCount(secret) >= 32;
 }
 
 public sealed class TenantContext
@@ -65,16 +71,24 @@ public sealed class InternalTokenService(IOptions<InternalAuthOptions> options)
     public string CreateToken(string audience, string tenantId)
     {
         var value = options.Value;
-        if (Encoding.UTF8.GetByteCount(value.SigningKey) < 32)
+        if (!value.OutboundSecrets.TryGetValue(audience, out var secret) || !InternalAuthOptions.HasValidSecret(secret))
         {
-            throw new InvalidOperationException("InternalAuth:SigningKey must contain at least 32 UTF-8 bytes.");
+            throw new InvalidOperationException(
+                $"InternalAuth:OutboundSecrets:{audience} must be configured with at least 32 UTF-8 bytes.");
         }
         if (!TenantContext.TryNormalize(tenantId, out var canonicalTenant))
         {
             throw new ArgumentException("Tenant ID must be a non-empty UUID.", nameof(tenantId));
         }
         var now = DateTime.UtcNow;
-        return new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(
+        var credentials = new SigningCredentials(
+            new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret)),
+            SecurityAlgorithms.HmacSha256);
+        var header = new JwtHeader(credentials)
+        {
+            [JwtHeaderParameterNames.Kid] = value.ServiceName
+        };
+        var payload = new JwtPayload(
             issuer: value.Issuer,
             audience: audience,
             claims:
@@ -85,20 +99,29 @@ public sealed class InternalTokenService(IOptions<InternalAuthOptions> options)
             ],
             notBefore: now,
             expires: now.AddSeconds(Math.Clamp(value.TokenTtlSeconds, 30, 900)),
-            signingCredentials: new SigningCredentials(
-                new SymmetricSecurityKey(Encoding.UTF8.GetBytes(value.SigningKey)),
-                SecurityAlgorithms.HmacSha256)));
+            issuedAt: now);
+        return new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(header, payload));
     }
 }
 
 public sealed class InternalRequestHandler(
     InternalTokenService tokenService,
-    TenantContext tenantContext) : DelegatingHandler
+    TenantContext tenantContext,
+    IOptions<InternalAuthOptions> authOptions) : DelegatingHandler
 {
+    private const string CoreBancarioAudience = "core-bancario-mock";
+
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var tenantId = tenantContext.TenantId;
-        request.Headers.Authorization = new("Bearer", tokenService.CreateToken("core-bancario-mock", tenantId));
+        // core-bancario-mock has no internal-auth validation (out of scope for
+        // per-service internal-auth secrets), so renegotiation-service has no configured
+        // OutboundSecrets entry for it. Only attach a Bearer token if one is ever configured
+        // for this audience; otherwise skip signing rather than fail the outbound call.
+        if (authOptions.Value.OutboundSecrets.ContainsKey(CoreBancarioAudience))
+        {
+            request.Headers.Authorization = new("Bearer", tokenService.CreateToken(CoreBancarioAudience, tenantId));
+        }
         request.Headers.Remove("X-Tenant-Id");
         request.Headers.TryAddWithoutValidation("X-Tenant-Id", tenantId);
         return base.SendAsync(request, cancellationToken);
@@ -194,9 +217,6 @@ public static class PlatformExtensions
         services.AddSingleton<TenantContext>();
         services.AddSingleton<InternalTokenService>();
         services.AddSingleton<PlatformMetrics>();
-        var key = Encoding.UTF8.GetByteCount(auth.SigningKey) >= 32
-            ? auth.SigningKey
-            : "invalid-missing-internal-auth-signing-key-32-bytes";
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
         {
             options.MapInboundClaims = false;
@@ -207,10 +227,45 @@ public static class PlatformExtensions
                 ValidateAudience = true,
                 ValidAudience = auth.ServiceName,
                 ValidateIssuerSigningKey = true,
-                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)),
+                IssuerSigningKeyResolver = (token, securityToken, kid, parameters) =>
+                {
+                    if (kid is null
+                        || !auth.InboundSecrets.TryGetValue(kid, out var secret)
+                        || !InternalAuthOptions.HasValidSecret(secret))
+                    {
+                        return Array.Empty<SecurityKey>();
+                    }
+                    return new SecurityKey[] { new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret)) };
+                },
                 ValidateLifetime = true,
                 ClockSkew = TimeSpan.FromSeconds(30),
                 NameClaimType = JwtRegisteredClaimNames.Sub
+            };
+            options.Events = new JwtBearerEvents
+            {
+                OnTokenValidated = context =>
+                {
+                    var kid = context.SecurityToken switch
+                    {
+                        JsonWebToken jsonWebToken => jsonWebToken.Kid,
+                        JwtSecurityToken jwtSecurityToken => jwtSecurityToken.Header.Kid,
+                        _ => null
+                    };
+                    var sub = context.Principal?.FindFirstValue(JwtRegisteredClaimNames.Sub);
+                    if (!string.Equals(kid, sub, StringComparison.Ordinal))
+                    {
+                        context.HttpContext.RequestServices.GetRequiredService<PlatformMetrics>()
+                            .Increment("renegotiation_internal_auth_failures_total", ("reason", "kid_sub_mismatch"));
+                        context.Fail("Token kid header does not match sub claim.");
+                    }
+                    return Task.CompletedTask;
+                },
+                OnAuthenticationFailed = context =>
+                {
+                    context.HttpContext.RequestServices.GetRequiredService<PlatformMetrics>()
+                        .Increment("renegotiation_internal_auth_failures_total", ("reason", "authentication_failed"));
+                    return Task.CompletedTask;
+                }
             };
         });
         services.AddAuthorization(options =>

@@ -10,35 +10,47 @@ namespace renegotiation_service.Tests.Testing;
 /// Mirrors renegotiation-service's own InternalTokenService (Platform/PlatformServices.cs) so
 /// WebApplicationFactory-based endpoint tests can mint a JWT that satisfies the mandatory
 /// FallbackPolicy (RequireAuthenticatedUser) instead of bypassing auth entirely.
+/// renegotiation-service only has one configured inbound caller (tool-service-renegotiation,
+/// see InternalAuth:InboundSecrets:tool-service-renegotiation), so every token minted here is
+/// signed with that pair's secret and carries kid == sub == "tool-service-renegotiation".
 /// </summary>
 public static class TestAuth
 {
-    public const string SigningKey = "test-only-internal-auth-signing-key-32-bytes-min";
+    public const string InboundSecret = "test-only-tool-service-renegotiation-inbound-secret-32b";
     public const string Issuer = "conversational-ai-platform";
     public const string Audience = "renegotiation-service";
+    public const string CallerServiceName = "tool-service-renegotiation";
     public const string TenantId = "00000000-0000-0000-0000-000000000001";
 
-    public static void ConfigureSigningKey(IWebHostBuilder builder) =>
-        builder.UseSetting("InternalAuth:SigningKey", SigningKey);
+    public static void ConfigureInboundSecret(IWebHostBuilder builder) =>
+        builder.UseSetting($"InternalAuth:InboundSecrets:{CallerServiceName}", InboundSecret);
 
     public static string IssueToken()
     {
         var now = DateTime.UtcNow;
         var token = new JwtSecurityToken(
-            issuer: Issuer,
-            audience: Audience,
-            claims:
-            [
-                new Claim(JwtRegisteredClaimNames.Sub, "test-caller"),
-                new Claim("tenant_id", TenantId)
-            ],
-            notBefore: now,
-            expires: now.AddMinutes(5),
-            signingCredentials: new SigningCredentials(
-                new SymmetricSecurityKey(Encoding.UTF8.GetBytes(SigningKey)),
-                SecurityAlgorithms.HmacSha256));
+            BuildHeader(),
+            new JwtPayload(
+                issuer: Issuer,
+                audience: Audience,
+                claims:
+                [
+                    new Claim(JwtRegisteredClaimNames.Sub, CallerServiceName),
+                    new Claim("tenant_id", TenantId)
+                ],
+                notBefore: now,
+                expires: now.AddMinutes(5),
+                issuedAt: now));
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
+
+    private static JwtHeader BuildHeader() =>
+        new(new SigningCredentials(
+            new SymmetricSecurityKey(Encoding.UTF8.GetBytes(InboundSecret)),
+            SecurityAlgorithms.HmacSha256))
+        {
+            [JwtHeaderParameterNames.Kid] = CallerServiceName
+        };
 
     /// <summary>
     /// Mirrors the "governed_tool" token tool-service-renegotiation signs for
@@ -57,7 +69,7 @@ public static class TestAuth
         var now = DateTime.UtcNow;
         List<Claim> claims =
         [
-            new Claim(JwtRegisteredClaimNames.Sub, "tool-service-renegotiation"),
+            new Claim(JwtRegisteredClaimNames.Sub, CallerServiceName),
             new Claim("tenant_id", TenantId),
             new Claim("token_use", "governed_tool"),
             new Claim("tool_name", toolName),
@@ -73,14 +85,14 @@ public static class TestAuth
         }
 
         var token = new JwtSecurityToken(
-            issuer: Issuer,
-            audience: Audience,
-            claims: claims,
-            notBefore: now,
-            expires: now.AddMinutes(5),
-            signingCredentials: new SigningCredentials(
-                new SymmetricSecurityKey(Encoding.UTF8.GetBytes(SigningKey)),
-                SecurityAlgorithms.HmacSha256));
+            BuildHeader(),
+            new JwtPayload(
+                issuer: Issuer,
+                audience: Audience,
+                claims: claims,
+                notBefore: now,
+                expires: now.AddMinutes(5),
+                issuedAt: now));
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 }

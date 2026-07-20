@@ -1,4 +1,3 @@
-using System.Text;
 using Microsoft.Extensions.Http.Resilience;
 using Microsoft.Extensions.Options;
 using Npgsql;
@@ -66,7 +65,8 @@ static void AddCoreClient<TClient, TImplementation, TOptions>(
         })
         .AddHttpMessageHandler(sp => new InternalRequestHandler(
             sp.GetRequiredService<InternalTokenService>(),
-            sp.GetRequiredService<TenantContext>()))
+            sp.GetRequiredService<TenantContext>(),
+            sp.GetRequiredService<IOptions<InternalAuthOptions>>()))
         .AddStandardResilienceHandler(options =>
         {
             options.Retry.MaxRetryAttempts = retryAttempts;
@@ -115,9 +115,10 @@ app.MapGet("/health/ready", async (
     CancellationToken cancellationToken) =>
 {
     var failures = new List<string>();
-    if (Encoding.UTF8.GetByteCount(authOptions.Value.SigningKey) < 32)
+    if (!authOptions.Value.InboundSecrets.TryGetValue("tool-service-renegotiation", out var inboundSecret)
+        || !InternalAuthOptions.HasValidSecret(inboundSecret))
     {
-        failures.Add("internal_auth_signing_key_invalid");
+        failures.Add("internal_auth_inbound_secret_invalid:tool-service-renegotiation");
     }
     try
     {
