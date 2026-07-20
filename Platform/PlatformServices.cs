@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -130,27 +131,34 @@ public sealed class InternalRequestHandler(
 
 public sealed class PlatformMetrics
 {
-    private readonly ConcurrentDictionary<string, long> _values = new();
-    private readonly ConcurrentDictionary<string, double> _sums = new();
+    private readonly ConcurrentDictionary<string, long> _counters = new();
+    private readonly ConcurrentDictionary<string, double> _durationSums = new();
+    private readonly ConcurrentDictionary<string, long> _durationCounts = new();
 
     public void Increment(string name, params (string Name, string Value)[] labels) =>
-        _values.AddOrUpdate(Key(name, labels), 1, (_, value) => value + 1);
+        _counters.AddOrUpdate(Key(name, labels), 1, static (_, value) => value + 1);
 
-    public void Observe(string name, double seconds, params (string Name, string Value)[] labels) =>
-        _sums.AddOrUpdate(Key(name, labels), seconds, (_, value) => value + seconds);
+    public void Observe(string name, double seconds, params (string Name, string Value)[] labels)
+    {
+        var key = Key(name, labels);
+        _durationSums.AddOrUpdate(key, seconds, (_, value) => value + seconds);
+        _durationCounts.AddOrUpdate(key, 1, static (_, value) => value + 1);
+    }
 
     public string Render()
     {
         var output = new StringBuilder();
-        foreach (var item in _values.OrderBy(item => item.Key))
+        foreach (var item in _counters.OrderBy(item => item.Key, StringComparer.Ordinal))
         {
             output.Append(item.Key).Append(' ').Append(item.Value).AppendLine();
         }
-        foreach (var item in _sums.OrderBy(item => item.Key))
+        foreach (var item in _durationCounts.OrderBy(item => item.Key, StringComparer.Ordinal))
         {
-            output.Append(item.Key).Append(' ')
-                .Append(item.Value.ToString(System.Globalization.CultureInfo.InvariantCulture))
-                .AppendLine();
+            _durationSums.TryGetValue(item.Key, out var sum);
+            output.Append(ReplaceMetricName(item.Key, "_seconds", "_seconds_count"))
+                .Append(' ').Append(item.Value).AppendLine();
+            output.Append(ReplaceMetricName(item.Key, "_seconds", "_seconds_sum"))
+                .Append(' ').Append(sum.ToString(CultureInfo.InvariantCulture)).AppendLine();
         }
         return output.ToString();
     }
@@ -161,6 +169,16 @@ public sealed class PlatformMetrics
         var rendered = string.Join(",", labels.Select(label =>
             $"{Regex.Replace(label.Name, "[^a-zA-Z0-9_:]", "_")}=\"{label.Value.Replace("\"", "\\\"")}\""));
         return $"{name}{{{rendered}}}";
+    }
+
+    private static string ReplaceMetricName(string key, string suffix, string replacement)
+    {
+        var labelsIndex = key.IndexOf('{');
+        var name = labelsIndex >= 0 ? key[..labelsIndex] : key;
+        var labels = labelsIndex >= 0 ? key[labelsIndex..] : string.Empty;
+        return name.EndsWith(suffix, StringComparison.Ordinal)
+            ? name[..^suffix.Length] + replacement + labels
+            : name + replacement + labels;
     }
 }
 
@@ -199,12 +217,23 @@ public sealed class PlatformMiddleware(RequestDelegate next, TenantContext tenan
         {
             tenantScope?.Dispose();
             stopwatch.Stop();
-            metrics.Increment("renegotiation_http_requests_total",
+            var path = NormalizePath(context.Request.Path.Value ?? "/");
+            metrics.Increment("platform_http_requests_total",
                 ("method", context.Request.Method),
-                ("status", context.Response.StatusCode.ToString()));
-            metrics.Observe("renegotiation_http_duration_seconds", stopwatch.Elapsed.TotalSeconds,
-                ("method", context.Request.Method));
+                ("path", path),
+                ("status", context.Response.StatusCode.ToString(CultureInfo.InvariantCulture)));
+            metrics.Observe("platform_http_request_duration_seconds", stopwatch.Elapsed.TotalSeconds,
+                ("method", context.Request.Method),
+                ("path", path));
         }
+    }
+
+    private static string NormalizePath(string path)
+    {
+        path = Regex.Replace(path, "/[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}", "/{id}");
+        path = Regex.Replace(path, @"/\d{6,}", "/{id}");
+        path = Regex.Replace(path, "/[A-Za-z0-9_-]{24,}", "/{id}");
+        return path;
     }
 }
 
