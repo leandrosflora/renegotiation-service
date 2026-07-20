@@ -30,6 +30,7 @@ public class FormalizationEndpointsTests : IClassFixture<WebApplicationFactory<P
         client.Setup(c => c.ConfirmAsync("sim-1", It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AgreementConfirmationResult(true, null, new AgreementData("agr-1")));
         var httpClient = CreateClient(client.Object);
+        AuthorizeConfirmation(httpClient, "idem-1");
 
         var response = await PostConfirmationAsync(httpClient);
 
@@ -46,6 +47,7 @@ public class FormalizationEndpointsTests : IClassFixture<WebApplicationFactory<P
         client.Setup(c => c.ConfirmAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AgreementConfirmationResult(false, "simulation_expired", null));
         var httpClient = CreateClient(client.Object);
+        AuthorizeConfirmation(httpClient, "idem-1");
 
         var response = await PostConfirmationAsync(httpClient);
 
@@ -62,6 +64,7 @@ public class FormalizationEndpointsTests : IClassFixture<WebApplicationFactory<P
         client.Setup(c => c.ConfirmAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("connection refused"));
         var httpClient = CreateClient(client.Object);
+        AuthorizeConfirmation(httpClient, "idem-1");
 
         var response = await PostConfirmationAsync(httpClient);
 
@@ -77,6 +80,19 @@ public class FormalizationEndpointsTests : IClassFixture<WebApplicationFactory<P
         var response = await httpClient.PostAsync("/simulations/sim-1/confirmations", content: null);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    private static void AuthorizeConfirmation(HttpClient httpClient, string idempotencyKey)
+    {
+        const string messageId = "wamid.confirm-1";
+        httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            TestAuth.IssueGovernedToolToken(
+                "confirmar_acordo",
+                "ConfirmationPending",
+                idempotencyKey,
+                messageId: messageId,
+                confirmationMessageId: messageId));
     }
 
     private static Task<HttpResponseMessage> PostConfirmationAsync(HttpClient httpClient)

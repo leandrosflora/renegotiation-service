@@ -30,6 +30,7 @@ public class SimulationEndpointsTests : IClassFixture<WebApplicationFactory<Prog
         client.Setup(c => c.SimulateAsync("contract-1", It.IsAny<SimulationRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SimulationResult(true, null, new SimulationData("sim-1", 12, 100m, 1200m)));
         var httpClient = CreateClient(client.Object);
+        AuthorizeSimulation(httpClient, "idem-possible-1");
 
         var response = await httpClient.PostAsJsonAsync(
             "/contracts/contract-1/simulations", new { installments = 12, discount_percentage = 0.0 });
@@ -47,6 +48,7 @@ public class SimulationEndpointsTests : IClassFixture<WebApplicationFactory<Prog
         client.Setup(c => c.SimulateAsync(It.IsAny<string>(), It.IsAny<SimulationRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SimulationResult(false, "installments_out_of_range", null));
         var httpClient = CreateClient(client.Object);
+        AuthorizeSimulation(httpClient, "idem-not-possible-1");
 
         var response = await httpClient.PostAsJsonAsync(
             "/contracts/contract-1/simulations", new { installments = 999, discount_percentage = 0.0 });
@@ -64,11 +66,20 @@ public class SimulationEndpointsTests : IClassFixture<WebApplicationFactory<Prog
         client.Setup(c => c.SimulateAsync(It.IsAny<string>(), It.IsAny<SimulationRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("connection refused"));
         var httpClient = CreateClient(client.Object);
+        AuthorizeSimulation(httpClient, "idem-unavailable-1");
 
         var response = await httpClient.PostAsJsonAsync(
             "/contracts/contract-1/simulations", new { installments = 12, discount_percentage = 0.0 });
 
         Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+    }
+
+    private static void AuthorizeSimulation(HttpClient httpClient, string idempotencyKey)
+    {
+        httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            TestAuth.IssueGovernedToolToken("simular_proposta", "ContractSelected", idempotencyKey));
+        httpClient.DefaultRequestHeaders.Add("Idempotency-Key", idempotencyKey);
     }
 
     private HttpClient CreateClient(IContractingApiClient contractingApiClient)
