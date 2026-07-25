@@ -22,7 +22,18 @@ public class EligibilityApiClientTests
 
         var result = await client.CheckEligibilityAsync("contract-1", CancellationToken.None);
 
-        Assert.True(result.Eligible);
+        Assert.True(result!.Eligible);
+    }
+
+    [Fact]
+    public async Task CheckEligibilityAsync_NotFound_ReturnsNull()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+        var client = BuildClient(handler);
+
+        var result = await client.CheckEligibilityAsync("1", CancellationToken.None);
+
+        Assert.Null(result);
     }
 
     [Fact]
@@ -36,7 +47,7 @@ public class EligibilityApiClientTests
 
         var result = await client.CheckEligibilityAsync("contract-1", CancellationToken.None);
 
-        Assert.False(result.Eligible);
+        Assert.False(result!.Eligible);
         Assert.Equal("overdue_too_long", result.Reason);
     }
 
@@ -50,7 +61,7 @@ public class EligibilityApiClientTests
 
         var result = await client.CheckEligibilityAsync("contract-1", CancellationToken.None);
 
-        Assert.True(result.Eligible);
+        Assert.True(result!.Eligible);
         Assert.True(handler.CallCount >= 2);
     }
 
