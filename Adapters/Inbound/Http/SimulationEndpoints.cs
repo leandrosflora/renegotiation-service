@@ -7,8 +7,18 @@ namespace renegotiation_service.Adapters.Inbound.Http;
 
 public static class SimulationEndpoints
 {
+    // Mirrors tool-service-renegotiation's SIMULATION_STAGES exactly - this is the same
+    // journey_stage claim from the same signed JWT, defense-in-depth re-checked independently
+    // here rather than trusted from the caller. Started/IdentificationPending/CustomerIdentified/
+    // ContractSelectionPending included so a single-contract customer's very first message can
+    // reach a proactively-offered simulation in the same turn as identification+eligibility, not
+    // just tool-service's own gate.
     private static readonly HashSet<string> AllowedStages =
     [
+        "Started",
+        "IdentificationPending",
+        "CustomerIdentified",
+        "ContractSelectionPending",
         "ContractSelected",
         "EligibilityChecked",
         "SimulationParametersPending"
