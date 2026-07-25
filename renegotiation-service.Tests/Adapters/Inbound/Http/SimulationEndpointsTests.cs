@@ -60,6 +60,28 @@ public class SimulationEndpointsTests : IClassFixture<WebApplicationFactory<Prog
     }
 
     [Fact]
+    public async Task PostSimulation_FromStartedStage_IsAllowed()
+    {
+        // Mirrors tool-service-renegotiation's SIMULATION_STAGES: the agent is now expected to
+        // proactively offer a simulation in the same turn as identification+eligibility for a
+        // single-contract customer's very first message, signed with Started.
+        var client = new Mock<IContractingApiClient>();
+        client.Setup(c => c.SimulateAsync("contract-1", It.IsAny<SimulationRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SimulationResult(true, null, new SimulationData("sim-1", 12, 100m, 1200m)));
+        var httpClient = CreateClient(client.Object);
+        var idempotencyKey = "idem-started-1";
+        httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            TestAuth.IssueGovernedToolToken("simular_proposta", "Started", idempotencyKey));
+        httpClient.DefaultRequestHeaders.Add("Idempotency-Key", idempotencyKey);
+
+        var response = await httpClient.PostAsJsonAsync(
+            "/contracts/contract-1/simulations", new { installments = 12, discount_percentage = 0.0 });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
     public async Task PostSimulation_ApiUnavailable_ReturnsBadGateway()
     {
         var client = new Mock<IContractingApiClient>();
